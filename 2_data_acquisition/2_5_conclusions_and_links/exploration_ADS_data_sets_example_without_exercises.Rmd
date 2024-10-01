@@ -1,0 +1,382 @@
+---
+title: "Exploring scanner and web scraped data sets"
+author: ""
+subtitle: ''
+date: ""
+output:
+  html_document:
+    toc: yes
+    toc_float: true
+    code_folding: show
+  word_document:
+    toc: no
+  pdf_document:
+    toc: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("IndexNumR")
+```
+
+# Packages to use
+
+```{r packages, echo=TRUE, warning=FALSE}
+
+library(IndexNumR)
+library(PriceIndices)
+library(dplyr)
+library(tidyverse)
+library(readxl)
+library(flextable)
+
+```
+
+
+# Introduction
+
+A more concrete and practical knowledge of the structure of alternative data sources is a handful and important step in the data acquisition process since this allows NSOs to better understand this kind of data helping them to design the data requirements for their purposes. 
+
+While negotiating with retailers for scanner data NSOs can also ask for preliminary feeds of data to better understand the data available and structure and clarify doubts about the data. This will help to fine tune the requirements and data structure necessary for their needs. 
+
+A preliminary analysis of initial samples of scraped data can also be of interest to check if all the desirable and necessary variables are being extracted, what are their characteristics and what will be the IT requirements to store the data for longer times etc.
+
+Let's see some examples of exploration of the characteristics of such kind of data sets with support of R software.
+
+For a nice demo on how to install R and the Rstudio and an introductory hands-on tutorial on a some functionalities of the tidyverse [see this material](https://xtophedataviz.shinyapps.io/LearnR-Tutorial/#section-data-exploration).  
+
+
+# Dominicks finer foods example
+
+Usually the acquisition of scanner data is a process that can take months or even years. This can make difficult for NSOs that do not have acquired of such data sets to get a practical experience on its structure. However, currently some scanner data sets have became public allowing a "premature" exploration of this data by NSOs that want to get experience in the field.
+
+Use of open data sets can allow NSOs to perform and develop studies that can be useful and adapted for their own data. These can include data checks for the variables received, development and tests of matching, filtering and classification techniques as well as different price indices methods. Use of open data sets is also important for replication of studies in the field allowing the establishment of good practices and benchmarks.
+
+A nice scanner data set available for study and exploration is the so-called [Dominicks Finer Foods](https://www.chicagobooth.edu/research/kilts/research-data/dominicks) data set available for research by the University of Chicago Booth School of Business. This data is based in a real scanner data set from a real groceries chain from the US that is now extinct. However, the data set contains many similar characteristics found in scanner data currently in use by NSOs for compilation of CPIs.
+
+Here we show a nice way to load such kind of data set with the support of R's IndexNumR package by means of the function dominicksData (see more details of the function functionalities at the [documentation](https://cran.r-project.org/web/packages/IndexNumR/IndexNumR.pdf)). 
+
+Let's have a look of how the data for the category cigarettes can be easily loaded:   
+
+```{r import_dominicks, echo=TRUE}
+data = dominicksData("Cigarettes")
+```
+## Data structure
+
+Once the data is loaded, we can now explore some of the characteristics of the data using the functionalities of the dplyr package. 
+
+For instance, let's look at the content of the data loaded:
+
+```{r data_content, echo=TRUE}
+data %>%
+  glimpse() 
+```
+
+This show us that the data contains 16 variables and over 1.8 million rows. This number of rows is smaller than in the raw data  set (see table in page 255 in [the data manual](https://www.chicagobooth.edu/-/media/enterprise/centers/kilts/datasets/dominicks-dataset/dominicks-manual-and-codebook_kiltscenter)) since a process of data cleaning is already implemented in the package as specified in the details of the ['dominicksData()' function documentation](https://cran.r-project.org/web/packages/IndexNumR/IndexNumR.pdf). Note also in this documentation the treatments that were perfomed already to derive the expenditure, quantity and price variables.  
+
+
+```{r data_dict, echo=FALSE}
+Dictionary = data.frame(variables = names(data), description = c("Week id", "UPC code", "Store id", "Unit price", "Sale code (B,C,S)  B = Bonus, C = Coupon , S = simple price reduction.", "Gross margin", "Expenditure with a product", "Quantity bought", "Dominick's Commodity Code", "Product Name", "Product Size", "Number of items in a case", "Dominick's item code", "Week's starting day","Week's ending day", "Special dates"))
+
+```
+
+The variables' description are presented in the table.
+
+```{r data_dict_table, echo=FALSE}
+flextable(Dictionary)
+```
+
+
+A preview of the first rows of the data set can be obtained via the code below:
+
+```{r data_preview, echo=TRUE}
+head(data) 
+```
+
+## Time identifiers
+
+By the inspection of the first rows we can observe the structure of the data more clearly. One can observe that the data presents information of purchases made weekly for different products and stores of the chain. In other words, **data is aggregated weekly** but disagregated by the different stores in the chain and the different article codes.  
+
+One can note that the time dimension is characterized by a **week** id and a starting and end date for the day for which the week starts (**start**) or ends (**end**), respectively. We can observe a few examples combining the select and distinct verbs of the dplyr package and again making use of *head* just to show the top rows. 
+
+```{r data_preview_week, echo=TRUE}
+data %>% select(week, start, end) %>% distinct %>% head()
+```
+
+The number of different weeks in the data set can be otained as: 
+
+```{r data_total_week, echo=TRUE}
+data %>% select(week, start, end) %>% n_distinct 
+```
+As the weeks in the data set are sorted (if not, you could use the 'min()' and 'max()' functions), the first and last weeks are, respectively, given by: 
+
+```{r data_first_week, echo=TRUE}
+data %>% select(week) %>% first()
+```
+
+
+```{r data_last_week, echo=TRUE}
+data %>% select(week) %>% last()
+```
+
+There is one **week** with no information. It is the week 219 as can be inspected below:
+
+```{r data_missing_week, echo=TRUE}
+data %>% select(week) %>% distinct %>% as.vector()
+```
+
+The **specialEvents** signed in the data set is related to special dates such as national holidays and we can find the special dates contained here as:
+
+```{r data_special_events, echo=TRUE}
+data %>% select(specialEvents) %>% distinct 
+
+```
+## Store identifiers
+
+The stores are distingueshed by a unique store id given by the **store** variable. We can obtain the total number of stores in the data set as:
+
+```{r data_total_stores, echo=TRUE}
+data %>% select(store) %>% n_distinct # n_distinct(store) #%>% distinct %>% head()
+```
+
+Additional information on the stores are provided in the [data manual](https://www.chicagobooth.edu/-/media/enterprise/centers/kilts/datasets/dominicks-dataset/dominicks-manual-and-codebook_kiltscenter) (see page 14).
+
+## Product descriptors
+
+Moving to the products codes, one can note that there are different product codes and other variables with products' description and package characteristics.
+
+The **upc** code is short for *universal product code* and plays the role of a universal code like the GTIN that we have discussed in our courses on scanner data. The **nitem** is an internal product identifier used by Dominicks to identify products. Such code is used to try to track product relaunchs which occurs when products suffer minimal or even no changes but are coded with different upc codes. The table derived below can provide a few examples.
+
+
+```{r product_codes, echo=TRUE}
+data %>% select(descrip, upc, nitem, com_code, size, case) %>% distinct() %>% head()
+```
+
+We can also find what how many different upc and nitem codes exist, respectively, as:
+
+```{r ditinct_upc_nitem, echo=TRUE}
+ c(data %>% select(upc) %>% n_distinct(), data %>% select(nitem) %>% n_distinct())
+```
+
+Existence of different product codes can be very helpful in the process of identifying and tracking similar products along time as will be discussed in the data preparation course.
+
+Note that for the nitem code **86200** different upc codes can be observed even though the product description (the **descrip** variable), size and package have not changed.
+
+The **com_code** amounts to Dominck's commodity code and is a code that has a broader coverage of products that belong to a similar group attributed by the chain. The existence of such kind of internal code is useful to support the process of product's classification into the CPI structure as they might help the mapping process into the CPI categories. The number of commodity codes can also be extracted as
+
+```{r product_com_codes, echo=TRUE}
+data %>% select(com_code) %>% n_distinct() 
+```
+## Package descriptors
+
+**size** amount to the products size and **case** to the number of items in the cases. Presence of such variables is useful to track product size changes wich is also useful for tracking similar products over time and properly measure shrinkinflation.
+
+Some examples of the different combination of size and cases:
+
+```{r size_case_number, echo=TRUE}
+data %>%  select(size, case) %>% distinct %>% head()
+```
+
+## Sales exploration
+
+The **price** here refers to a unit value price for the sale of a given upc code in a given week and store. The respective **quantity** purchased is contained in the variable with the same name for this same code in the given week and store.
+
+**expenditure** is the product of these two variables as can naively be seem for a few rows via creation of a new variable called turnover using the *mutate* command and then using the select and head commands to show a few rows:
+
+```{r prod_turnover, echo=TRUE}
+data = data %>%  mutate(turnover = price*quantity)
+data  %>% select(expenditure, turnover) %>% head()
+```
+Select can also be used to remove columns, for instance, the column *profit* may not be of much use for CPI compilation and could be excluded, along with the extra column turnover that we created above, via:
+
+```{r remove_var, echo=TRUE}
+data = data %>%  select(-c(profit, turnover)) 
+data %>% head()
+```
+
+
+We can find out what were the stores with the largest sales in the period grouping the stores and summing the expenditures for each store. This can be performed as (we are including head at the end just to show the first results, if you want to show all, just remove the commands after the summarize part): 
+
+
+```{r sales_stores, echo=TRUE}
+data %>%  group_by(store) %>% summarize(tot_sales = sum(expenditure)) %>% head()
+```
+
+We can also move a step further and sort the result in descending order to rank the stores. This is done adding the arrange verb with the desc function to our "pipeline" above:
+
+```{r sales_stores_sorted, echo=TRUE}
+data %>%  group_by(store) %>% summarize(tot_sales = sum(expenditure)) %>% arrange(desc(tot_sales)) %>% head()
+```
+Now that we found that store 122 is the number one in sales in the period, let's check if its sales along the period are consistent or were subject to large fluctuations over time. This is a check that can be performed for evaluation if the data received for a real scanner data has large fluctuations and if this might signal an important event or an error. 
+
+We can do this by filtering the store of interest and now performing the calculation of the total sales grouped by week. At the end, in this case it can be useful to make a summary of the results to inspect the summary statistics to get insight of the distribution.
+
+```{r sales_store_week_summary, echo=TRUE}
+data %>%  filter(store == 122) %>% group_by(week) %>% summarize(tot_sales = sum(expenditure)) %>% summary
+```
+We can observe that the bulk of the sales are around 1800 to 5200 dollars a week. However fluctuations of order of ten times in the sales were observed for the week with lowest and largest sales. At the initical exploration phase this could be checked with the retailer what can bring to these fluctuations.
+
+In a similar fashion, we can also explore for the store with largest sales what was the article with upc code most sold in the whole period.
+
+```{r sales_store_upc_most_sold, echo=TRUE}
+data %>%  filter(store == 122) %>% group_by(upc) %>% summarize(tot_sales = sum(expenditure)) %>% arrange(desc(tot_sales)) %>% head()
+```
+
+Finding that upc 197 is the most sold for store 122 in the whole period, we can now find which were the weeks with largest and smallest sales, respectively as:
+
+```{r sales_upc_most_sold_max, echo=TRUE}
+data %>%  filter(store == 122, upc == 197) %>% group_by(week) %>% summarize(tot_sales = sum(expenditure)) %>% slice_max(tot_sales, n=1)
+```
+```{r sales_upc_most_sold_min, echo=TRUE}
+data %>%  filter(store == 122 & upc == 197) %>% group_by(week) %>% summarize(tot_sales = sum(expenditure)) %>% slice_min(tot_sales, n=1)
+```
+
+We note that there is a large difference between the results and that for the lowest sales there was a tie in 4 weeks in the period. By making a closer inspection in the results for these weeks we can find that the weeks with lowest sales correspond to a sale of just one unit while for the week with largest sales 2667 units were sold. 
+
+
+```{r sales_upc_max_min_detail, echo=TRUE}
+data %>%  filter(store == 122, upc == 197, week %in% c(11, 137, 138, 145, 146))
+```
+As the lowest sales were found for large week ids, this probably signals that the product is going out of stock in the latest periods. If we derive the total quantity and expenditure for instance before and after week 130 we can see that this seems to be the case: 
+
+```{r sales_upc_max_after_week130, echo=TRUE}
+data %>%  filter(store == 122, upc == 197, week >130) %>% summarize(tot_quantity = sum(quantity), tot_exp = sum(expenditure))
+```
+
+```{r sales_upc_max_before_week130, echo=TRUE}
+data %>%  filter(store == 122 & upc == 197, week < 130) %>% summarize(tot_quantity = sum(quantity), tot_exp = sum(expenditure))
+```
+
+
+## Products and stores lifetime
+
+This leads us to another important study to better understand the data which is to know the lifetime of stores and products in the panel. 
+
+We can evaluate how long the stores have stayed in the panel as (just showing the top results):
+
+```{r stores_fifetime, echo=TRUE}
+data %>% group_by(store) %>% select(week) %>% distinct %>% count %>% arrange((n)) %>% head(10)
+```
+We can observe that only a few stores stayed less than 100 weeks in the panel.
+
+Similarly, we can check for the stability of upc codes via observation of summary statistics for the products lifetime 
+
+```{r products_fifetime, echo=TRUE}
+data %>% group_by(upc) %>% select(week) %>% distinct %>% count %>% ungroup() %>% select(n) %>% summary(n)
+```
+The results show that some products were observed only in a single week and up to 75\% of the upc codes lasted only up to 206 weeks which is almost half of the time window.
+
+Analysis of prices and quantities distributions for products codes is important to check for data inconsistencies and market practices.
+
+# Example of web scraped data set
+
+It is important to know that different data sources might have distinct variables available with their own characteristics. An example of a data set obtained via web scraping is given below (this data set is a sample of a web scraped data obtained from the Groceriesbear project and the feed is available as supplementary material at this [link](https://data.mendeley.com/datasets/w293jxpggj/2)) due the study performed by the authors of this [paper](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4759493) : 
+
+## Data structure
+
+We can import the csv file and evaluate the structure of the data set as:
+
+```{r cigarettes_web_import, echo=TRUE}
+dados_web = read_csv2("20210615_Cigarettes.csv")
+dados_web %>% glimpse
+
+```
+
+```{r cigarettes_web_view, echo=TRUE}
+head(dados_web)
+
+```
+
+
+## Variables changes 
+
+
+One can contrast the structure against the one observed previously for the Dominicks data set. The number of variables is more reduced as web data usually cannot provide information related to sales transacted. The time identifier is split in the columns year and month and the store identifier is not given by a single identifier but by the columns city and store. By concatenating the time and store variables one can create new columns and perform similar analysis as in the section above. This could be done as
+
+```{r cigarettes_web_new_view, echo=TRUE}
+dados_web = dados_web %>% mutate(time = paste0(year,"-",month), store_id = paste0(city,store))
+dados_web %>% head()
+```
+
+We can than change the columns order as: 
+
+```{r cigarettes_web_relocate, echo=TRUE}
+dados_web = dados_web %>% relocate(time) 
+dados_web = dados_web %>% relocate(store_id, .after = product_id)
+head(dados_web)
+```
+Note that for this data set the data is aggregated monthly for each product code and store. This kind of aggregation is suitable for studies of index methods, however, for production purposes usually higher frequencies such as week feeds are required in order to allow proper time for NSOs to compile and publish the indices from the data received according the CPI schedule.
+
+Using these new variables we can easily find out how many months are present in this data set:
+
+
+```{r cigarettes_web_nmonths, echo=TRUE}
+dados_web %>% select(time) %>% n_distinct
+
+```
+And the number of different stores.
+
+```{r cigarettes_web_nstores, echo=TRUE}
+dados_web %>% select(store_id) %>% n_distinct
+
+```
+## Products and stores lifetime
+
+We can also perform analysis such as the persistence of stores and products in the panel: 
+
+```{r cigarettes_web_storepersist, echo=TRUE}
+dados_web %>% group_by(store_id) %>% select(time) %>% distinct %>% count() %>% arrange(desc(n))
+
+```
+```{r cigarettes_web_pricepersistdist, echo=TRUE}
+dados_web %>% group_by(product_id) %>% select(time) %>% distinct %>% count() %>% summary
+```
+This shows us that about 50\% of the products stay up to 5 months in the panel.
+
+## Analysis of product price characteristics
+
+It is also interesting to inspect the prices range to get further insights of the data and check for possible inconsistencies for better understanding of their origin. Note that before calculating the summary statistics for the prices here we first need to convert the prices variable to a numeric format.  
+
+```{r cigarettes_web_price_transform, echo=TRUE}
+dados_web %>% mutate(price = as.numeric(dados_web$price))
+
+```
+
+The summary statistics for the prices are given by
+
+
+```{r cigarettes_web_prices_summary, echo=TRUE}
+
+dados_web %>% select(price)  %>% summary
+```
+
+We can observe a range in the prices by 2 orders of magnitute. If we explore a bit more, for instance filtering for the lower and higher prices as below, we can note via the products descriptions that large difference in prices seem to arise from the fact that for the lowest prices the sales seem to correspond to sales of a few units while for the largest prices to a box with 100s of units inside. 
+
+Contrast the structure of the data set here with the one by Dominicks where variables on the packaging were available while here this needs to be extracted from the products descriptions when available.
+
+```{r cigarettes_web_prices_smallest, echo=TRUE}
+
+dados_web %>% filter(price < 0.7 ) %>% arrange(price)
+```
+
+```{r cigarettes_web_prices_largest, echo=TRUE}
+
+dados_web %>% filter(price > 100 ) %>% arrange(price)
+```
+
+
+
+In order to establish limits to validate the prices, it is necessary then to perform a more detailed analysis at the article codes level. We can for instance calculate the mininum and maximum price for each product and respective coefficient of variation and filter for the products with largest variation:   
+
+```{r cigarettes_web_prices_bu_prod, echo=TRUE}
+
+dados_web %>% group_by(product_id) %>% summarize(min_p = min(price), max_p = max(price), cv = sd(price)/mean(price)) %>% filter(cv > 0.3) %>% arrange(desc(cv))
+```
+The results show us that most of the products have a cv lower than 35\% and there is one product with a large discrepancy in prices. If we inspect the results for the products with 3 largest cvs we can observe that they were present only twice in the whole sample and the difference in prices came from sales at different stores.
+
+```{r cigarettes_web_prices_largest_cv, echo=TRUE}
+
+dados_web %>% filter(product_id %in% c('n6pk6p6s2', 'n6pk2p5sk', 'n6pp3s5p3')) %>% arrange(product_id)
+```
+

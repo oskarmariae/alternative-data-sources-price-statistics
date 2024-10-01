@@ -1,0 +1,148 @@
+---
+title: "Exploring scanner and web scraped data sets"
+author: ""
+subtitle: 'Exercises'
+date: ""
+output:
+  word_document:
+    toc: no
+  html_document:
+    toc: yes
+    toc_float: true
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("IndexNumR")
+```
+
+# Packages to use
+
+```{r packages, echo=TRUE, warning=FALSE, warning=FALSE}
+
+library(PriceIndices)
+library(dplyr)
+
+
+```
+
+
+
+# Exercises
+
+Let's practice on a scanner data set contained in the R PriceIndices package. Use the expertise that you have learned in the example of the exploration of the Dominick's data set to answer the questions respective the **milk** data set.
+
+To do that, load the PriceIndices package and note that the data set can be accessed after loading the package. You will need to explore the data set using some codes in R to find the answer.
+
+```{r price_indices, echo=TRUE}
+library(PriceIndices)
+head(milk)
+```
+1) What is the number of rows in the whole data set (hint: use the glimpse function)?
+
+() 6
+() 4386
+() 1236
+
+2) What is the number of variables in the data set?
+
+() 6
+() 4
+() 7
+
+3) How is data being aggregated in time?
+
+() daily
+() weekly
+() hourly
+() monthly
+
+4) The variables retID (it is interesting to note here that the data is being given at the retailer level, and not at the stores level) and prodID identify a given retailer and product, respectively. Find out what is the respective number of distinct retailers and products in the data set. 
+
+
+```{r price_indices_stores_prods, echo=FALSE}
+print(c( milk %>% select(retID) %>% n_distinct, milk %>% select(prodID) %>% n_distinct))
+```
+
+() 5, 61
+() 6, 66
+() 7, 69
+() 5, 68
+
+
+
+5) Use the 'mutate()' verb of dplyr to create a new column called turnover which is the result of the product of the prices and quantities columns and answer what is the retailer with the largest amount of sales accumulated in the whole period. 
+
+```{r price_indices_stores_milk, echo=FALSE}
+milk %>% mutate(turnover = prices*quantities) %>% group_by(retID) %>% summarize(sales = sum(turnover)) %>% arrange(desc(sales)) %>% ungroup()
+```
+
+() 1311
+() 2210
+() 6610
+() 7611
+() 8910
+
+6) For the retailer with the largest turnover, what is the product with the largest expenditure in the period?
+
+```{r store_prod_largsale, echo=FALSE}
+milk %>% mutate(turnover = prices*quantities) %>% filter(retID == 2210) %>%  group_by(prodID) %>% summarize(sales = sum(turnover)) %>% arrange(desc(sales)) %>% ungroup() %>% head()
+```
+
+() 15404
+() 34540
+() 401350
+() 406245
+() 404770
+
+7) For the product found above, what is the period where the sales were lower and higher for the retailer with largest turnover found above, respectively?
+
+```{r store_prod_largsalemax, echo=FALSE}
+milk %>% mutate(turnover = prices*quantities) %>% filter(retID == 2210, prodID ==406245) %>%  slice_max(turnover, n=1)
+```                                                                                                                                         
+() 2018-12-01
+() 2019-12-01
+() 2019-08-01
+() 2020-08-01
+
+```{r store_prod_largsalemin, echo=FALSE}
+milk %>% mutate(turnover = prices*quantities) %>% filter(retID == 2210, prodID ==406245) %>%  slice_min(turnover, n=1)
+```  
+
+
+() 2018-12-01
+() 2019-12-01
+() 2019-08-01
+() 2020-08-01
+
+8) Have all the retailers stayed for the same number of months in the panel?
+
+```{r store_prod_largsale2, echo=FALSE}
+milk %>% group_by(retID) %>% select(time) %>% distinct %>% count
+
+```                                                                                                                         
+
+
+() yes
+() no
+
+
+9) How many months the products with shorter lifetime stayed in the panel?
+
+```{r store_prod_largsale3, echo=FALSE}
+milk %>% group_by(prodID) %>% select(time) %>% distinct %>% count %>% arrange((n)) %>% head()
+
+```  
+
+
+() 1 month
+() 2 months
+() 3 months
+() 4 months
+() 5 months
+
+
