@@ -1,0 +1,354 @@
+---
+title: "Calculating Bilateral Indices"
+author: ""
+subtitle: ''
+date: ""
+output:
+  html_document:
+    toc: yes
+    toc_float: true
+    code_folding: show
+  word_document:
+    toc: no
+  pdf_document:
+    toc: yes
+---
+
+# Preparation {.tabset}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(dplyr.summarise.inform = FALSE)
+options(dplyr.mutate.inform = FALSE)
+options(tidyverse.quiet = TRUE)
+```
+
+This exercise is based on the packages that were already used in previous chapters. In most cases, we will use the package "PriceIndices" to calculate price indices in detail. Other than that we use popular packages for data manipulation, data visualisation and so on. 
+
+```{r packages, message=FALSE, warning=FALSE}
+#library(IndexNumR) # for price index calculations
+library(PriceIndices) # for price index calculations
+#library(dplyr) # for data manipulation
+library(tidyverse) # for data analysis
+#library(stringr) # for data manipulation
+library(lubridate) # for date manipulation
+library(plotly) # for graphics
+```
+
+Let's calculate bilateral indices with support of R software.
+
+
+## Dataset
+
+We use data from a set of food prices in italian supermarkets by Banca d'Italia, Università Campus Bio-Medico and Università degli Studi della Tuscia. The complete dataset is available [here](https://zenodo.org/records/14927602). We did aggregate the data by month and added artificial quantities. This data is available [here]( https://github.com/UN-Task-Team-for-Scanner-Data/alternative-data-sources-price-statistics/blob/main/data/monthly_avg_price_with_qty.csv).
+
+```{r import_data, echo=TRUE}
+data <- read.csv("https://raw.githubusercontent.com/UN-Task-Team-for-Scanner-Data/alternative-data-sources-price-statistics/refs/heads/main/data/monthly_avg_price_with_qty.csv")
+
+#data <- read.csv("https://raw.githubusercontent.com/UN-Task-Team-for-Scanner-Data/alternative-data-sources-price-statistics/refs/heads/main/data/Oranges_with_#Synthetic_Quantities.csv")
+```
+
+## Data Preparation
+The data contains stores of different regions. Different regions or store types should not be aggregated at product level for the calculation of elementary indices. So we only use apples from one stores in the region lombardia.
+
+In some approaches we need to compare prices of different products. In order to do so we first have to adjust the price to a common scale. We use the weight information from the product description to calculate the price per kg. If we change the scale of the price we also need to adjust the quantity to the same scale otherwise the sales volumes would be off. Note that this adjustment has an effect on the price change of the dutot index.
+
+```{r stores, echo=TRUE}
+# Filter for Apples in Store 6 
+data <- data %>% filter(COICOP5 %in% "Apples" & store_id %in% 6) %>%
+         mutate(product_id = as.numeric(factor(product)),
+                volume = price * quantity)
+
+# Extract size from product description
+data <- data %>% mutate(size = case_when(str_sub(product, -2, -1) == "kg" ~ as.numeric(str_extract(product, "(\\d+).(\\d+)")),
+                                         str_sub(product, -2, -1) == "gr" ~ as.numeric(str_extract(product, "(\\d+).(\\d+)")) / 1000),
+                        ) 
+
+# adjusting prices to common scale (kg)  
+data <- data %>% mutate(price = price / size,
+                        quantity = quantity * size) 
+
+#data <- data %>% mutate(date = stringr::str_sub(date,1,7),
+#                        size = as.numeric(stringr::str_sub(product,-6,-3)),
+#                        volume = price * quantity) %>%
+#          group_by(date, product_id, product, size) %>% 
+#          summarize(price = sum(volume) / sum(quantity),
+#                    quantity = sum(quantity),
+#                    volume = sum(volume))
+```
+
+# Index calculation {.tabset}
+
+Once the data is prepared we can start calculating indices. In this chapter we show how to compile different types of indices. 
+
+## The static sample approach 
+
+### Sampling
+In the first month of the data collection, a sample must be selected. With regard to sample size and product selection, the same considerations apply as for traditional on-site surveys. If we know the sales volume of the products, we can take this information into account. As a rule of thumb, we choose the bestselling items. Other aspects should also be taken into account, e.g. a preference for items from varying brands.
+
+We choose a sample of 3 items (4, 6, 43).
+
+```{r sampling, echo=TRUE}
+#(4, 6, 20, 5) product_id original data-> (7268, 11657, 11659, 25092)
+sample <- c(2, 3, 20)
+```
+
+### Price change
+
+In order to calculate the price change of the period, it is necessary to know the price of both the current period and the base period. In this example we use december 2020 as our base period.
+
+First we calculate the price change from december 2020 (m0) to january 2021 (m1) using the unweighted formulas Jevons and Dutot.
+
+```{r , echo=TRUE}
+m0 <- "2020-12" # base period
+m1 <- "2021-01" # current period
+
+matched_items <- intersect(data %>% filter(month_year == m0, product_id %in% sample) %>% select(product_id), 
+                           data %>% filter(month_year == m1, product_id %in% sample) %>% select(product_id)) %>% pull()
+
+p0 <- data %>% filter(month_year %in% m0, product_id %in% matched_items) %>% select(price) %>% unlist()
+p1 <- data %>% filter(month_year %in% m1, product_id %in% matched_items) %>% select(price) %>% unlist()
+
+jevons <- prod(p1/p0)^(1/length(matched_items))
+dutot <- (sum(p1) / length(p1)) / (sum(p0) / length(p0))
+```
+
+The Jevons formula `r sprintf("(%+0.2f%%)",(jevons -1)*100)` results in a slightly more pronounced price decrease than that produced by the Dutot formula `r sprintf("(%+0.2f%%)",(dutot -1)*100)`.<br>
+
+
+If sales information is available we can also use weighted index formulas to calculate different types of indices. Here we calculate a Laspeyres, a Paasche, a Fisher and finally a Törnqvist index. 
+
+We use the same products and periods but need the quantities respectively market shares of the sampled products. We use the quantities sold in the base period (m0) for Laspeyres, Fisher and Törnqvist indices and quantities of the current period (m1) for Paasche, Fisher and Törnqvist indices.
+
+
+```{r , echo=TRUE}
+# vectors containing the quantities in both periods
+q0 <- data %>% filter(month_year %in% m0, product_id %in% matched_items) %>% select(quantity) %>% unlist()
+q1 <- data %>% filter(month_year %in% m1, product_id %in% matched_items) %>% select(quantity) %>% unlist()
+
+laspeyres <- sum(p1 * q0) / sum(p0 * q0)
+paasche <- sum(p1 * q1) / sum(p0 * q1) 
+fisher <- sqrt(sum(p1 * q0) / sum(p0 * q0) * sum(p1 * q1) / sum(p0 * q1))
+
+s0 <- p0 * q0 / sum(p0 * q0)
+s1 <- p1 * q1 / sum(p1 * q1)
+
+törnqvist <- prod((p1 / p0)^((s0 + s1)/2))
+```
+
+A simple way to calculate indices using a wide variety of formulas is to use packages created for this purpose. Here we show how this works using the PriceIndices package.    
+
+In order to use the package we have to transform our data into the form the package uses. Specifically this means to create a dataframe with the following columns:   
+"time" in the format "yyyy-mm-dd"    
+"prodID" as numerical, factor or character     
+"prices" as numerical (strictly positiv values)     
+"quantities" as numerical (strictly positiv values)     
+
+The static approach means that we restrict our data frame to the items in our sample.   
+
+We can directly use the formula function to calculate a price change. We use the function jevons to do so. The arguments we have to state for the function are data, start (the base period) and end (comparison month).    
+
+Alternatively we might use the generic function price_index. If we use this function we have to state the formula we intend to use. Here we choose the fisher formula.      
+
+The function price_indices returns the results of multiple indices at the same time. With this function, which combines different types of indices, we must explicitly specify that we want to calculate bilateral indices. Therefore, we enter our formulas in the ‘bilaterals’ argument.   
+
+```{r , echo=TRUE}
+#IndexNumR:::jevons_t(p0, p1)
+#IndexNumR:::dutot_t(p0, p1)
+data <- data %>%
+         mutate(prices = price,
+                quantities = quantity, 
+                prodID = product_id, # if_else(product_id %in% sample, product_id, NA_real_)
+                time = as.Date(paste(month_year, "01", sep = "-")))
+
+data_trad <- data %>% filter(product_id %in% sample)
+
+jevons(data_trad, start = m0, end = m1)
+price_index(data_trad, start = m0, end = m1, formula = "fisher")
+price_indices(data_trad, start = m0, end = m1, bilateral = c("jevons", "dutot", "laspeyres", "paasche","fisher", "tornqvist"))
+```
+
+### Index Calculation
+
+These functions from the PriceIndices-Package can also be used to calculate indices over multiple periods. We can calculate a fixed base index for the whole year 2021 by setting the end date as "2021-12" and setting the argument "interval" as TRUE.     
+
+By contrast if we want to calculate monthly chained indices we have to use different index formulas. We get the these by using "chjevons" instead of "jevons", "chfisher" instead of "fisher", etc.     
+```{r , echo=TRUE}
+PriceIndices::price_indices(data_trad, start = "2020-12", end = "2021-12", bilateral = c("jevons", "dutot", "laspeyres", "paasche","fisher", "tornqvist"), interval = T)
+PriceIndices::price_indices(data_trad, start = "2020-12", end = "2021-12", bilateral = c("chjevons", "chdutot", "chlaspeyres", "chpaasche","chfisher", "chtornqvist"), interval = T)
+
+```
+
+If we compare the results we notice that there is a difference in December for the chain linked jevons and the fixed base jevons. This is the case if we do not have matching items over the whole period. In this case item nbr. 2 one of the three items in our sample is no longer sold in november. The static sample approach replaces items that are no longer sold. Thus we decide to replace item 2 by item 5.      
+
+If we want to use the predefined functions to calculate indices with direct replacements we have to manipulate the data beforehand. There are many ways to achieve this. In this case we add item 5 to our dataset from November onwards by assigning it the prodID of item 2. In a production process this manipulation should be done more carefully. Like assigning each item of the sample a specific and traceable id that is not the sku or ean number.   
+
+
+```{r , echo=TRUE}
+data_trad <- data %>% 
+              filter(product_id %in% 5, month_year > "2021-10-31") %>%
+              mutate(prodID = 2) %>%
+              bind_rows(data_trad, .)
+
+PriceIndices::price_indices(data_trad, start = "2020-12", end = "2021-12", bilateral = c("jevons", "dutot", "laspeyres", "paasche","fisher", "tornqvist"), interval = T)
+PriceIndices::price_indices(data_trad, start = "2020-12", end = "2021-12", bilateral = c("chjevons", "chdutot", "chlaspeyres", "chpaasche","chfisher", "chtornqvist"), interval = T)
+```
+Now the results for jevons and dutot dont change wheter we use a fixed base or monthly chained index. On the other hand we still have substantial differences for the formulas that use sales to weight the items. The monthly chained Laspeyres index is 15 percentage points higher than the fixed based version. It shows clearly an upwards bias that is typical for a laspeyres index that is frequently chainded. That is way it is strongly disencouraged to use a superlative index combined with frequent chain-linkage.    
+
+Note however, that this dataset uses artificial quantities that are highly volatile. This difference should be substantially smaller for most datasets with real quantities.
+
+## A dynamic approach
+The dynamic appraoch does not use a hand picked sample. The number of used items might change each period. This means that the approach chain-links every period. To avoid the biases we have just seen in the example above it is essential that we use a formula that does not weight the items. One of the advantages of this approaches is that it can be applied if the data lacks sales information e.g. web-scraped data.  
+
+```{r , echo=TRUE}
+price_indices(data, start = "2020-12", end = "2021-12", bilateral = c("chjevons", "chdutot"), interval = T)
+```
+
+
+Do we really want to skip data filtering and imputation? then it stops here.
+
+### Price Change
+
+The next step is data filtering. We only asses matched items that where sold in both periods. We filter by removing all items where the price changed by factor of 3. Additionally we apply a dumping filter by removing items with less than a fifth of the expenditure and a price below two-thirds of the previous price. 
+
+```{r , echo=TRUE}
+m0 <- "2020-12"
+m1 <- "2021-01"
+
+matched_items <- intersect(data %>% filter(month_year == m0) %>% select(product_id), 
+                           data %>% filter(month_year == m1) %>% select(product_id)) %>% pull()
+
+matched_set <- data %>% filter(product_id %in% matched_items, month_year %in% c(m0, m1)) 
+
+sample <- matched_set %>%
+            group_by(month_year) %>%
+            mutate(volume_share = volume / sum(volume)) %>%
+            group_by(product_id) %>%
+            mutate(mean_volume_share = mean(volume_share)) %>%
+            ungroup() %>%
+            filter(mean_volume_share > (1 / (length(matched_items) * 1.25)))
+
+jevons(sample, start = m0, end = m1)
+```
+
+The sample consists of a `r nrow(sample)/2` items and and a marketshare of `r sprintf("%.0f%%",sum(sample$volume_share) / 2 *100)` of all the matched items.
+
+### Index Calculation
+
+The calculation of indices with these dyanamic approach is more complicated because we cant use the predefined functions to easily calculate multiple months. Instead we can build a function that calculates each month and chain the results together. 
+
+```{r , echo=TRUE}
+price_changes <- sapply(as.Date("2020-12-01") + months(1:12), function(x){
+  m0 <- format(as.Date(x) + months(-1), "%Y-%m")
+  m1 <- format(as.Date(x), "%Y-%m")  
+  matched_items <- intersect(data %>% filter(month_year == m0) %>% select(product_id), 
+                             data %>% filter(month_year == m1) %>% select(product_id)) %>% pull()
+
+  matched_set <- data %>% filter(product_id %in% matched_items, month_year %in% c(m0, m1)) 
+
+  sample <- matched_set %>%
+            group_by(month_year) %>%
+            mutate(volume_share = volume / sum(volume)) %>%
+            group_by(product_id) %>%
+            mutate(mean_volume_share = mean(volume_share)) %>%
+            ungroup() %>%
+            filter(mean_volume_share > (1 / (length(matched_items) * 1.25)))
+
+  jevons(sample, start = m0, end = m1)
+})
+
+setNames(cumprod(c(1, price_changes)) , format(as.Date("2020-12-01") + months(0:12), "%Y-%m"))
+
+```
+The calculation of indices with these dyanamic approach is more complicated because we cant use the predefined functions to easily calculate multiple months. Instead we can build a function that calculates each month and chain the results together. 
+
+Because we need to transform the dataset when imputing we use a list object that contains a) the adapted dataset b) the index and c) a list of all samples items (that might need to be imputed).
+
+The first part of the function is essential the same as before. We calculate the price change and chain link the index. The additional steps are the following:
+
+1. update the list of sampled items   
+2. add a record for all the items that need to be imputed and dont have one in the comparison period (m1). Some of the items that need imputation most likely already have a record but are not sampled because they are below the sales threshhold.
+3. impute the price of the comparison period (m1) for all items that are no longer sampled by multiplying the price of the base period (m0) by the price change of the elementary aggregate. We keep imputing all the items for the whole period. In a real production pipeline the items should only be imputed for 15 months (enough that items that are sold once a year are still linked but not eternally in case the item id gets reused by a different item at a later time).
+
+
+```{r , echo=TRUE}
+data_dyna = data
+mb <- as.Date("2020-12-01")
+index = setNames(1, format(mb, "%Y-%m"))
+sampled = c()
+
+for (x in c(1:12)) {
+  m0 <- format(mb + months(x - 1), "%Y-%m")
+  m1 <- format(mb + months(x), "%Y-%m")
+  matched_items <- intersect(data %>% filter(month_year == m0) %>% select(product_id), 
+                             data %>% filter(month_year == m1) %>% select(product_id)) %>% pull()
+
+  matched_set <- data_dyna %>% filter(product_id %in% matched_items, month_year %in% c(m0, m1)) 
+
+  sample <- matched_set %>%
+            group_by(month_year) %>%
+            mutate(volume_share = volume / sum(volume)) %>%
+            group_by(product_id) %>%
+            mutate(mean_volume_share = mean(volume_share)) %>%
+            ungroup() %>%
+            filter(mean_volume_share > (1 / (length(matched_items) * 1.25)))
+  
+  index[m1] <- index[m0] * jevons(sample, start = m0, end = m1)
+  sampled <- c(sampled, sample$prodID) %>% unique()
+  
+  missing_records <- setdiff(sampled, data_dyna %>% filter(month_year == m1) %>% select(product_id) %>% pull())
+  
+  data_dyna <- data_dyna %>% 
+    add_row(month_year = m1, time = mb + months(x),
+            prodID = missing_records,
+            volume = 0) 
+  
+  to_impute <- setdiff(sampled, sample$prodID)
+  
+  data_dyna <- data_dyna %>% 
+    arrange(prodID, month_year) %>%
+    mutate(prices = if_else(prodID %in% to_impute & month_year %in% m1, lag(prices) * index[m1], prices))
+}
+
+index
+```
+
+## An alternative approach
+
+Statistic Finland uses an alternative approach. In this approach we start by defining a year long base period that only changes once a year. We calculate unit prices and market shares for the entirety of this base period.
+
+We then calculate Törnqvist indices for the months from December to July. Last we use this price relatives to calculate an index starting in December.
+
+```{r , echo=TRUE}
+
+base_period <- data %>% 
+  filter(year(time) %in% 2020) %>%
+  group_by(prodID, product, product_id) %>%
+  summarise(price = sum(volume, na.rm = T) / sum (quantities, na.rm = T),
+            quantity = sum(quantity, na.rm = T),
+            volume = sum(volume, na.rm = T)) %>%
+  mutate(time = as.Date("2011-11-01")) %>%
+  ungroup()
+
+price_changes <- sapply(as.Date("2021-12-01") + months(0:6), function(x){
+
+  m1 <- format(as.Date(x) + months(-1), "%Y-%m") # current period
+  
+  matched_items <- intersect(base_period %>% select(product_id), 
+                             data %>% filter(month_year == m1) %>% select(product_id)) %>% pull()
+  
+  p0 <- base_period %>% filter(product_id %in% matched_items) %>% select(price) %>% unlist()
+  p1 <- data %>% filter(month_year %in% m1, product_id %in% matched_items) %>% select(price) %>% unlist()
+  
+  q0 <- base_period %>% filter(product_id %in% matched_items) %>% select(quantity) %>% unlist()
+  q1 <- data %>% filter(month_year %in% m1, product_id %in% matched_items) %>% select(quantity) %>% unlist()
+  
+  s0 <- p0 * q0 / sum(p0 * q0)
+  s1 <- p1 * q1 / sum(p1 * q1)
+  
+  prod((p1 / p0)^((s0 + s1)/2))
+})
+
+setNames(price_changes / price_changes[1] , format(as.Date("2021-12-01") + months(0:6), "%Y-%m"))
+
+```
+
